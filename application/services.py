@@ -1,5 +1,6 @@
 import hashlib
 import hmac
+import secrets
 
 from application.ports.ai_player import AIPlayerInterface
 from application.ports.password_hasher import PasswordHasherInterface
@@ -9,18 +10,61 @@ from domain.errors import DomainError
 
 
 class PasswordCryptoService(PasswordHasherInterface):
-    _SALT = b"secret_salt_1"
-    _ITERATIONS = 100_000
+    """PBKDF2-SHA256 со случайной солью на каждый пароль.
+
+    Старый формат (один общий статический salt) поддерживается только для
+    чтения, чтобы существующие пользователи могли войти после обновления.
+    """
+
+    _ALGORITHM = "pbkdf2_sha256"
+    _ITERATIONS = 600_000
+    _SALT_BYTES = 16
+    _MAX_ITERATIONS = 2_000_000
+
+    _LEGACY_SALT = b"secret_salt_1"
+    _LEGACY_ITERATIONS = 100_000
 
     def hash_password(self, password: str) -> str:
-        return hashlib.pbkdf2_hmac(
-            "sha256", password.encode(), self._SALT, self._ITERATIONS
-        ).hex()
+        salt = secrets.token_bytes(self._SALT_BYTES)
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), salt, self._ITERATIONS
+        )
+        return f"{self._ALGORITHM}${self._ITERATIONS}${salt.hex()}${digest.hex()}"
 
     def verify_password(self, password: str, password_hash: str) -> bool:
-        return hmac.compare_digest(
-            self.hash_password(password).encode(), password_hash.encode()
+        if password_hash.startswith(f"{self._ALGORITHM}$"):
+            return self._verify_current_format(password, password_hash)
+        return self._verify_legacy_format(password, password_hash)
+
+    def _verify_current_format(self, password: str, password_hash: str) -> bool:
+        try:
+            algorithm, iterations_raw, salt_hex, digest_hex = password_hash.split(
+                "$", 3
+            )
+            iterations = int(iterations_raw)
+            salt = bytes.fromhex(salt_hex)
+            expected_digest = bytes.fromhex(digest_hex)
+        except (TypeError, ValueError):
+            return False
+
+        if algorithm != self._ALGORITHM:
+            return False
+        if not 1 <= iterations <= self._MAX_ITERATIONS:
+            return False
+
+        actual_digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), salt, iterations
         )
+        return hmac.compare_digest(actual_digest, expected_digest)
+
+    def _verify_legacy_format(self, password: str, password_hash: str) -> bool:
+        legacy_digest = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode(),
+            self._LEGACY_SALT,
+            self._LEGACY_ITERATIONS,
+        ).hex()
+        return hmac.compare_digest(legacy_digest.encode(), password_hash.encode())
 
 
 class MiniMaxService(AIPlayerInterface):

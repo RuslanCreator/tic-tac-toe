@@ -1,0 +1,28 @@
+{
+    "$schema": "https://opencode.ai/config.json",
+    "permissions": [
+      // --- секреты: читать и править запрещено ---
+      { "action": "read", "resource": "*.env", "effect": "deny" },
+      { "action": "read", "resource": "*.env.*", "effect": "deny" },
+      { "action": "edit", "resource": "*.env", "effect": "deny" },
+      { "action": "edit", "resource": "*.env.*", "effect": "deny" },
+      { "action": "read", "resource": "*.pem", "effect": "deny" },
+      { "action": "read", "resource": "*.key", "effect": "deny" },
+  
+      // --- .git ---
+      { "action": "read", "resource": ".git/*", "effect": "deny" },
+      { "action": "read", "resource": "*/.git/*", "effect": "deny" },
+      { "action": "edit", "resource": ".git/*", "effect": "deny" },
+      { "action": "edit", "resource": "*/.git/*", "effect": "deny" },
+  
+      // --- зависимости, кеши, сборка ---
+      { "action": "read", "resource": "*/.venv/*", "effect": "deny" },
+      { "action": "read", "resource": ".venv/*", "effect": "deny" },
+      { "action": "read", "resource": "*/node_modules/*", "effect": "deny" },
+      { "action": "read", "resource": "*__pycache__/*", "effect": "deny" },
+      { "action": "read", "resource": "*/.pytest_cache/*", "effect": "deny" },
+      { "action": "read", "resource": "*/dist/*", "effect": "deny" },
+      { "action": "read", "resource": "*/build/*", "effect": "deny" },
+      { "action": "read", "resource": "*uv.lock", "effect": "deny" }
+    ]
+  }

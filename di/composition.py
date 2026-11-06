@@ -1,30 +1,46 @@
+import uuid
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends
+from fastapi import (
+    Depends,
+    Path,
+    Query,
+    WebSocket,
+    WebSocketException,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.requests import HTTPConnection
 
+from application.errors import AuthenticationError, ForbiddenError, NotFoundError
 from application.jwt_service import JWTService
 from application.ports.ai_player import AIPlayerInterface
 from application.ports.password_hasher import PasswordHasherInterface
 from application.services import MiniMaxService, PasswordCryptoService
+from application.strategies import (
+    MoveResponderRegistry,
+    PveMoveResponder,
+    PvpMoveResponder,
+)
 from application.use_cases import (
     AuthenticatePlayerUseCase,
     CreatePvEGameUseCase,
     CreatePvPGameUseCase,
-    DeleteGameSessionUseCase,
     GetFinishedSessionsUseCase,
     GetGameSessionUseCase,
     GetPlayerByUuidUseCase,
     GetWaitingSessionsUseCase,
     JoinPvPGameUseCase,
-    MakeMovePvEUseCase,
-    MakeMovePvPUseCase,
+    LeaveGameUseCase,
+    MakeMoveUseCase,
     SignUpUseCase,
 )
 from di.settings import Settings
+from domain.entities.game_session import GameMode, GameSession
 from infrastructure.repositories.game_session import GameSessionRepository
 from infrastructure.repositories.player import PlayerRepository
+
+WS_TOKEN_PROTOCOL = "access_token"
 
 
 class AppContext:
@@ -60,7 +76,12 @@ async def get_db_session(
     context: AppContext = Depends(get_context),
 ) -> AsyncGenerator[AsyncSession, None]:
     async with context.session_factory() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 
 # Каждая функция принимает свежую сессию базы данных этого конкретного HTTP-запроса,
@@ -111,13 +132,24 @@ def get_create_pve_game_use_case(
     return CreatePvEGameUseCase(game_session_repository=repository)
 
 
-def get_make_move_pve_use_case(
+def get_move_responders(
     context: AppContext = Depends(get_context),
+) -> MoveResponderRegistry:
+    return MoveResponderRegistry(
+        {
+            GameMode.PVP: PvpMoveResponder(),
+            GameMode.PVE: PveMoveResponder(context.ai_engine),
+        }
+    )
+
+
+def get_make_move_use_case(
     repository: GameSessionRepository = Depends(get_game_session_repository),
-) -> MakeMovePvEUseCase:
-    return MakeMovePvEUseCase(
+    responders: MoveResponderRegistry = Depends(get_move_responders),
+) -> MakeMoveUseCase:
+    return MakeMoveUseCase(
         game_session_repository=repository,
-        ai_engine=context.ai_engine,
+        responders=responders,
     )
 
 
@@ -125,12 +157,6 @@ def get_create_pvp_game_use_case(
     repository: GameSessionRepository = Depends(get_game_session_repository),
 ) -> CreatePvPGameUseCase:
     return CreatePvPGameUseCase(game_session_repository=repository)
-
-
-def get_make_move_pvp_use_case(
-    repository: GameSessionRepository = Depends(get_game_session_repository),
-) -> MakeMovePvPUseCase:
-    return MakeMovePvPUseCase(game_session_repository=repository)
 
 
 def get_join_pvp_game_use_case(
@@ -145,10 +171,10 @@ def get_waiting_session_use_case(
     return GetWaitingSessionsUseCase(game_session_repository=repository)
 
 
-def get_delete_session_use_case(
+def get_leave_game_use_case(
     repository: GameSessionRepository = Depends(get_game_session_repository),
-) -> DeleteGameSessionUseCase:
-    return DeleteGameSessionUseCase(game_session_repository=repository)
+) -> LeaveGameUseCase:
+    return LeaveGameUseCase(game_session_repository=repository)
 
 
 def get_game_session_use_case(
@@ -167,3 +193,48 @@ def get_finished_sessions_use_case(
     repository: GameSessionRepository = Depends(get_game_session_repository),
 ) -> GetFinishedSessionsUseCase:
     return GetFinishedSessionsUseCase(game_session_repository=repository)
+
+
+def _extract_ws_token(websocket: WebSocket, query_token: str | None) -> str:
+    """Берёт токен из Sec-WebSocket-Protocol, а query-параметр оставляет
+    как совместимый fallback для старых клиентов."""
+    protocols = websocket.headers.get("sec-websocket-protocol", "")
+    for protocol in protocols.split(","):
+        protocol = protocol.strip()
+        if protocol and protocol != WS_TOKEN_PROTOCOL:
+            return protocol
+
+    if query_token:
+        return query_token
+
+    raise AuthenticationError("Не передан токен для WebSocket-соединения")
+
+
+async def get_ws_player_id(
+    websocket: WebSocket,
+    token: str | None = Query(default=None),
+    jwt_service: JWTService = Depends(get_jwt_service),
+) -> str:
+    try:
+        raw_token = _extract_ws_token(websocket, token)
+        return jwt_service.decode_access_token(raw_token)
+    except AuthenticationError as exc:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION) from exc
+
+
+async def get_ws_game_session(
+    game_session_id: uuid.UUID = Path(...),
+    player_id: str = Depends(get_ws_player_id),
+    context: AppContext = Depends(get_context),
+) -> GameSession:
+    """Загружает и авторизует игру до accept(), не удерживая сессию БД."""
+    async with context.session_factory() as session:
+        use_case = GetGameSessionUseCase(
+            game_session_repository=GameSessionRepository(session)
+        )
+        try:
+            return await use_case.execute(
+                game_session_id=str(game_session_id), player_id=player_id
+            )
+        except (NotFoundError, ForbiddenError) as exc:
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION) from exc

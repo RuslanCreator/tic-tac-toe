@@ -1,7 +1,7 @@
 [project]
 name = "tictactoe"
 version = "0.1.0"
-description = "Add your description here"
+description = "Крестики-нолики на FastAPI: PvE, PvP и WebSocket"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -13,3 +13,30 @@ dependencies = [
     "uvicorn>=0.54.0",
     "websockets>=17.3",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.4",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = ["B008"]
+
+[tool.coverage.run]
+source = ["domain", "application", "web", "infrastructure"]

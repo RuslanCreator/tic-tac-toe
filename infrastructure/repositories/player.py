@@ -17,10 +17,13 @@ class PlayerRepository(PlayerRepositoryInterface):
         db_player = PlayerMapper.to_data(player)
         db_player.password_hash = password_hash
         try:
-            await self._session.merge(db_player)
-            await self._session.flush()
-        except IntegrityError as e:
-            raise ConflictError("Игрок с таким логином уже существует") from e
+            # Savepoint позволяет откатить только неудачный INSERT и оставить
+            # внешнюю транзакцию (и сессию) в рабочем состоянии.
+            async with self._session.begin_nested():
+                self._session.add(db_player)
+                await self._session.flush()
+        except IntegrityError as exc:
+            raise ConflictError("Игрок с таким логином уже существует") from exc
 
     async def get_by_login(self, login: str) -> tuple[Player, str] | None:
         query = select(PlayerDataModel).where(PlayerDataModel.login == login)

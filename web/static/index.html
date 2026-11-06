@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0b1020">
+    <title>Крестики-нолики</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header class="app-header">
+        <button class="logo" id="logo-button" type="button">Крестики<span>·</span>Нолики</button>
+        <div class="header-actions" id="user-area"></div>
+    </header>
+
+    <main class="app-main">
+        <section class="screen active" id="welcome-screen" aria-labelledby="welcome-title">
+            <div class="hero">
+                <p class="eyebrow">Онлайн-игра</p>
+                <h1 id="welcome-title">Крестики-нолики</h1>
+                <p class="muted">
+                    Сыграйте с ботом или найдите соперника в реальном времени.
+                    Партия начнётся сразу после входа.
+                </p>
+                <div class="hero-actions">
+                    <button class="btn btn-primary" id="welcome-login" type="button">Войти</button>
+                    <button class="btn btn-secondary" id="welcome-register" type="button">Создать аккаунт</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="screen" id="menu-screen" aria-labelledby="menu-title">
+            <div class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Главное меню</p>
+                        <h2 id="menu-title">Ваш ход</h2>
+                    </div>
+                    <span class="user-chip" id="menu-user"></span>
+                </div>
+
+                <div class="menu-grid">
+                    <button class="menu-card" id="play-bot" type="button">
+                        <span class="menu-icon" aria-hidden="true">🤖</span>
+                        <span class="menu-title">Против бота</span>
+                        <span class="menu-subtitle">Быстрая игра PvE</span>
+                    </button>
+                    <button class="menu-card" id="create-pvp" type="button">
+                        <span class="menu-icon" aria-hidden="true">⚔️</span>
+                        <span class="menu-title">Создать PvP</span>
+                        <span class="menu-subtitle">Лобби для друга</span>
+                    </button>
+                    <button class="menu-card" id="open-lobbies" type="button">
+                        <span class="menu-icon" aria-hidden="true">🌐</span>
+                        <span class="menu-title">Открытые лобби</span>
+                        <span class="menu-subtitle">Найти соперника</span>
+                    </button>
+                    <button class="menu-card" id="open-history" type="button">
+                        <span class="menu-icon" aria-hidden="true">🏁</span>
+                        <span class="menu-title">История игр</span>
+                        <span class="menu-subtitle">Результаты матчей</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <section class="screen" id="game-screen" aria-labelledby="game-title">
+            <div class="panel game-panel">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow" id="game-mode">Игра</p>
+                        <h2 id="game-title">Матч</h2>
+                    </div>
+                    <span class="turn-chip" id="connection-state" hidden></span>
+                </div>
+
+                <div class="players-row">
+                    <div class="player-card" id="player-self">Вы</div>
+                    <div class="player-card" id="player-opponent">Соперник</div>
+                </div>
+
+                <p class="game-status" id="game-status" role="status" aria-live="polite">
+                    Ожидание…
+                </p>
+
+                <div class="board" id="board" role="grid" aria-label="Игровое поле"></div>
+
+                <div class="game-actions">
+                    <button class="btn btn-danger" id="leave-game" type="button">
+                        Покинуть игру
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <section class="screen" id="lobbies-screen" aria-labelledby="lobbies-title">
+            <div class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">PvP</p>
+                        <h2 id="lobbies-title">Открытые лобби</h2>
+                    </div>
+                    <div class="heading-actions">
+                        <button class="btn btn-secondary" id="refresh-lobbies" type="button">
+                            Обновить
+                        </button>
+                        <button class="btn btn-ghost" id="lobbies-back" type="button">
+                            Назад
+                        </button>
+                    </div>
+                </div>
+                <div class="list" id="lobbies-list" aria-live="polite"></div>
+            </div>
+        </section>
+
+        <section class="screen" id="history-screen" aria-labelledby="history-title">
+            <div class="panel">
+                <div class="panel-heading">
+                    <div>
+                        <p class="eyebrow">Архив</p>
+                        <h2 id="history-title">История игр</h2>
+                    </div>
+                    <button class="btn btn-ghost" id="history-back" type="button">Назад</button>
+                </div>
+                <div class="list" id="history-list" aria-live="polite"></div>
+            </div>
+        </section>
+    </main>
+
+    <div class="modal-overlay" id="auth-modal" hidden>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+            <button class="modal-close" id="auth-close" type="button" aria-label="Закрыть">
+                ×
+            </button>
+            <h2 id="auth-title">Вход</h2>
+
+            <div class="tabs" role="tablist" aria-label="Вход или регистрация">
+                <button class="tab active" id="tab-login" type="button" role="tab" aria-selected="true">
+                    Вход
+                </button>
+                <button class="tab" id="tab-register" type="button" role="tab" aria-selected="false">
+                    Регистрация
+                </button>
+            </div>
+
+            <form id="auth-form" novalidate>
+                <label class="field">
+                    <span>Логин</span>
+                    <input
+                        id="auth-login"
+                        name="login"
+                        type="text"
+                        autocomplete="username"
+                        minlength="3"
+                        maxlength="25"
+                        required
+                    >
+                </label>
+                <label class="field">
+                    <span>Пароль</span>
+                    <input
+                        id="auth-password"
+                        name="password"
+                        type="password"
+                        autocomplete="current-password"
+                        minlength="6"
+                        maxlength="255"
+                        required
+                    >
+                </label>
+                <p class="form-error" id="auth-error" role="alert" hidden></p>
+                <button class="btn btn-primary btn-block" id="auth-submit" type="submit">
+                    Войти
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+    <script src="/static/app.js" defer></script>
+</body>
+</html>

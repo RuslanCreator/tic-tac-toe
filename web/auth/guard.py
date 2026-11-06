@@ -17,8 +17,6 @@ async def get_current_player_id(
     проверяет его валидность без запроса к БД и возвращает ID игрока.
     """
     if credentials is None:
-        raise AuthenticationError(
-            "Не передан заголовок Authorization: Bearer <token>"
-        )
+        raise AuthenticationError("Не передан заголовок Authorization: Bearer <token>")
 
     return jwt_service.decode_access_token(credentials.credentials)

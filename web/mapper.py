@@ -31,9 +31,15 @@ class WebGameMapper:
 
         return GameResponse(
             game_session_id=domain_game_session.id,
-            status=domain_game_session.status.name,
+            mode=domain_game_session.mode,
+            status=domain_game_session.status,
             status_text=domain_game_session.status_text,
             board=flat_board_strs,
+            grid_size=domain_game_session.board.grid_size,
+            player_x_id=domain_game_session.player_x_id,
+            player_o_id=domain_game_session.player_o_id,
+            current_player_id=domain_game_session.current_player_id,
+            is_finished=domain_game_session.is_finished(),
         )
 
     @classmethod
