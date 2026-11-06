@@ -1,14 +1,12 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from datasource.mappers.game_session import GameSessionMapper
-from datasource.model import GameSessionDataModel, PlayerDataModel
-from domain.entities.game_session import (
-    GameSession,
-    GameSessionState,
-    WaitingSessionInfo,
-)
-from domain.interfaces import GameSessionRepositoryInterface
+from application.errors import NotFoundError
+from application.ports.repositories import GameSessionRepositoryInterface
+from application.read_models import FinishedSessionInfo, WaitingSessionInfo
+from domain.entities.game_session import GameSession, GameSessionState
+from infrastructure.mappers.game_session import GameSessionMapper
+from infrastructure.model import GameSessionDataModel, PlayerDataModel
 
 
 class GameSessionRepository(GameSessionRepositoryInterface):
@@ -22,7 +20,7 @@ class GameSessionRepository(GameSessionRepositoryInterface):
     async def update(self, game_session: GameSession) -> None:
         db_game_model = await self._session.get(GameSessionDataModel, game_session.id)
         if db_game_model is None:
-            raise ValueError(f"Игровая сессия {game_session.id} не найдена")
+            raise NotFoundError(f"Игровая сессия {game_session.id} не найдена")
 
         GameSessionMapper.update_data_model(
             source_entity=game_session, target_model=db_game_model
@@ -69,43 +67,47 @@ class GameSessionRepository(GameSessionRepositoryInterface):
         )
         await self._session.execute(query)
 
-    # async def get_all_with_players(self) -> list[GameSessionDataModel]:
-    #     query = select(GameSessionDataModel).options(
-    #         selectinload(GameSessionDataModel.player_x),
-    #         selectinload(GameSessionDataModel.player_o),
-    #     )
-    #     result = await self._session.execute(query)
+    async def get_finished_by_player_id(
+        self, player_id: str
+    ) -> list[FinishedSessionInfo]:
+        query = (
+            select(GameSessionDataModel)
+            .where(
+                or_(
+                    GameSessionDataModel.player_x_id == player_id,
+                    GameSessionDataModel.player_o_id == player_id,
+                ),
+                GameSessionDataModel.status
+                in [
+                    GameSessionState.DRAW.value,
+                    GameSessionState.WON_X.value,
+                    GameSessionState.WON_O.value,
+                ],
+            )
+            .order_by(GameSessionDataModel.created_at.desc())
+        )
+        result = await self._session.execute(query)
 
-    #     return result.scalars().all()
+        return [self._to_finished_info(model, player_id) for model in result.scalars()]
 
-    # async def delete_old_games(self) -> None:
-    #     # Запрос к БД: Удалить все игры, которые старше 365 дней
-    #     # SQL: DELETE FROM games WHERE created_at < NOW() - INTERVAL '1 year'
-    #     query = delete(GameSessionDataModel).where(
-    #         GameSessionDataModel.created_at < func.now() - text("INTERVAL '1 year'")
-    #     )
-    #     await self._session.execute(query)
+    @staticmethod
+    def _to_finished_info(
+        model: GameSessionDataModel, player_id: str
+    ) -> FinishedSessionInfo:
+        status = GameSessionState(model.status)
 
+        if status == GameSessionState.DRAW:
+            result = "DRAW"
+        elif (status == GameSessionState.WON_X and model.player_x_id == player_id) or (
+            status == GameSessionState.WON_O and model.player_o_id == player_id
+        ):
+            result = "WIN"
+        else:
+            result = "LOSE"
 
-# For execute delete old games script
-
-# from apscheduler.schedulers.asyncio import AsyncIOScheduler
-# from fastapi import FastAPI
-# from di.container import DatabaseFactory
-# from datasource.repository import GameSessionRepository
-
-# app = FastAPI()
-# scheduler = AsyncIOScheduler()
-
-# # Функция, которую планировщик будет дергать сам
-# async def scheduled_cleanup():
-#     # Открываем чистую сессию из фабрики
-#     async with DatabaseFactory.get_session() as session:
-#         repo = GameSessionRepository(session)
-#         await repo.delete_old_games()
-
-# @app.on_event("startup")
-# async def start_scheduler():
-#     # Настраиваем запуск каждый день в 3 часа ночи прямо внутри FastAPI
-#     scheduler.add_job(scheduled_cleanup, "cron", hour=3, minute=0)
-#     scheduler.start()
+        return FinishedSessionInfo(
+            game_session_id=model.id,
+            status=status,
+            result=result,
+            created_at=model.created_at,
+        )

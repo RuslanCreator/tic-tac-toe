@@ -17,7 +17,7 @@ class ConnectionManager:
             if not self._active_connections[game_session_id]:
                 del self._active_connections[game_session_id]
 
-    async def broadcast(self, game_session_id: str, message: dict):
+    async def broadcast(self, game_session_id: str, message: dict) -> None:
         if game_session_id not in self._active_connections:
             return
 

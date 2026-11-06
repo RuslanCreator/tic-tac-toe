@@ -1,4 +1,6 @@
-from sqlalchemy import ARRAY, ForeignKey, Integer, String
+from datetime import datetime
+
+from sqlalchemy import ARRAY, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -10,7 +12,9 @@ class PlayerDataModel(Base):
     __tablename__ = "players"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
-    login: Mapped[str] = mapped_column(String(25), nullable=False)
+    login: Mapped[str] = mapped_column(
+        String(25), nullable=False, unique=True, index=True
+    )
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
 
 
@@ -21,7 +25,10 @@ class GameSessionDataModel(Base):
     status: Mapped[str] = mapped_column(String(100), nullable=False)
     grid_size: Mapped[int] = mapped_column(Integer, default=3)
     grid_cells: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False)
-    player_x_id: Mapped[str] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    player_x_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("players.id", ondelete="SET NULL"), nullable=True
     )
     player_o_id: Mapped[str | None] = mapped_column(

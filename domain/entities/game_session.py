@@ -1,16 +1,11 @@
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 
+from domain.errors import DomainError
+
 from .playing_board import CellState, PlayingBoard
-
-
-@dataclass(frozen=True)
-class WaitingSessionInfo:
-    """Легковесный доменный объект только для чтения (Query) в списке лобби."""
-
-    game_session_id: str
-    creator_login: str
 
 
 class GameRules:
@@ -44,6 +39,7 @@ class GameSession:
     board: PlayingBoard = field(default_factory=lambda: PlayingBoard.create_empty())
     player_x_id: str | None = None
     player_o_id: str | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     _status: GameSessionState = GameSessionState.WAITING
 
     @property
@@ -76,9 +72,14 @@ class GameSession:
         player_x_id: str | None,
         player_o_id: str | None,
         status: GameSessionState,
+        created_at: datetime | None = None,
     ) -> "GameSession":
         session = cls(
-            id=id, board=board, player_x_id=player_x_id, player_o_id=player_o_id
+            id=id,
+            board=board,
+            player_x_id=player_x_id,
+            player_o_id=player_o_id,
+            created_at=created_at or datetime.now(timezone.utc),
         )
         session._status = status
         return session
@@ -88,7 +89,7 @@ class GameSession:
             return self.player_o_id
         elif self._status == GameSessionState.TURN_X:
             return self.player_x_id
-        raise ValueError("Игроки еще не подключились!")
+        raise DomainError("Игроки еще не подключились!")
 
     def get_current_turn_sign(self) -> CellState:
         if self._status == GameSessionState.TURN_O:
@@ -97,28 +98,28 @@ class GameSession:
 
     def setup_match(self, player_id_o: str) -> None:
         if self._status != GameSessionState.WAITING:
-            raise ValueError(
+            raise DomainError(
                 "Невозможно запустить матч: сессия уже активна или завершена!"
             )
 
         if not self.player_x_id:
-            raise ValueError("Ошибка домена: у лобби отсутствует создатель (игрок X)!")
+            raise DomainError("Ошибка домена: у лобби отсутствует создатель (игрок X)!")
 
         if self.player_o_id is not None:
-            raise ValueError("В этой игровой сессии уже нет свободных мест!")
+            raise DomainError("В этой игровой сессии уже нет свободных мест!")
 
         self.player_o_id = player_id_o
         self._status = GameSessionState.TURN_X
 
     def make_move(self, row: int, col: int, player_id: str) -> None:
         if self._status == GameSessionState.WAITING:
-            raise ValueError("Нельзя совершить ход! Игра ожидает второго игрока.")
+            raise DomainError("Нельзя совершить ход! Игра ожидает второго игрока.")
         if self.is_finished():
-            raise ValueError("Попытка сделать ход в уже завершенной игре!")
+            raise DomainError("Попытка сделать ход в уже завершенной игре!")
 
         expected_player_id = self.get_current_player_id()
         if player_id != expected_player_id:
-            raise ValueError("Сейчас ход другого игрока!")
+            raise DomainError("Сейчас ход другого игрока!")
 
         self.board = self.board.set_cell(row, col, self.get_current_turn_sign())
         winner = GameRules.get_winner(self.board)
@@ -142,3 +143,6 @@ class GameSession:
             GameSessionState.WON_X,
             GameSessionState.WON_O,
         )
+
+    def is_participant(self, player_id: str) -> bool:
+        return player_id in (self.player_x_id, self.player_o_id)

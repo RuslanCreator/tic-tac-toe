@@ -1,21 +1,25 @@
-from application.services import MiniMaxService, PasswordCryptoService
-from domain.entities.game_session import (
-    GameSession,
-    GameSessionState,
-    WaitingSessionInfo,
+from application.errors import (
+    AuthenticationError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
 )
-from domain.entities.player import Player
-from domain.interfaces import (
+from application.ports.ai_player import AIPlayerInterface
+from application.ports.password_hasher import PasswordHasherInterface
+from application.ports.repositories import (
     GameSessionRepositoryInterface,
     PlayerRepositoryInterface,
 )
+from application.read_models import FinishedSessionInfo, WaitingSessionInfo
+from domain.entities.game_session import GameSession, GameSessionState
+from domain.entities.player import Player
 
 
 class SignUpUseCase:
     def __init__(
         self,
         player_repository: PlayerRepositoryInterface,
-        crypto_service: PasswordCryptoService,
+        crypto_service: PasswordHasherInterface,
     ):
         self._player_repository = player_repository
         self._crypto_service = crypto_service
@@ -23,7 +27,7 @@ class SignUpUseCase:
     async def execute(self, login: str, password: str) -> str:
         existing = await self._player_repository.get_by_login(login)
         if existing:
-            raise ValueError(f"Игрок с логином {login} уже существует!")
+            raise ConflictError(f"Игрок с логином {login} уже существует!")
 
         new_player = Player(login=login)
         password_hash = self._crypto_service.hash_password(password)
@@ -36,7 +40,7 @@ class AuthenticatePlayerUseCase:
     def __init__(
         self,
         player_repository: PlayerRepositoryInterface,
-        crypto_service: PasswordCryptoService,
+        crypto_service: PasswordHasherInterface,
     ):
         self._player_repository = player_repository
         self._crypto_service = crypto_service
@@ -44,12 +48,12 @@ class AuthenticatePlayerUseCase:
     async def execute(self, login: str, password: str) -> str:
         player_data = await self._player_repository.get_by_login(login)
         if not player_data:
-            raise ValueError("Кто ты, воин?")
+            raise AuthenticationError("Неверный логин или пароль")
 
         player, stored_hash = player_data
 
-        if stored_hash != self._crypto_service.hash_password(password):
-            raise ValueError("Неверный логин или пароль")
+        if not self._crypto_service.verify_password(password, stored_hash):
+            raise AuthenticationError("Неверный логин или пароль")
 
         return player.id
 
@@ -89,7 +93,7 @@ class JoinPvPGameUseCase:
             game_session_id
         )
         if not game_session:
-            raise ValueError(f"Игровая сессия с ID {game_session_id} не найдена!")
+            raise NotFoundError(f"Игровая сессия с ID {game_session_id} не найдена!")
 
         if player_id in (game_session.player_x_id, game_session.player_o_id):
             return game_session
@@ -115,7 +119,7 @@ class MakeMovePvPUseCase:
             game_session_id
         )
         if not game_session:
-            raise ValueError(f"Игровая сессия с ID {game_session_id} не найдена!")
+            raise NotFoundError(f"Игровая сессия с ID {game_session_id} не найдена!")
 
         game_session.make_move(row, col, player_id)
         await self._game_session_repository.update(game_session)
@@ -127,7 +131,7 @@ class MakeMovePvEUseCase:
     def __init__(
         self,
         game_session_repository: GameSessionRepositoryInterface,
-        ai_engine: MiniMaxService,
+        ai_engine: AIPlayerInterface,
     ):
         self._game_session_repository = game_session_repository
         self._ai_engine = ai_engine
@@ -139,9 +143,11 @@ class MakeMovePvEUseCase:
         col: int,
         player_id: str,
     ) -> GameSession:
-        game_session = await self._game_session_repository.get_by_id(game_session_id)
+        game_session = await self._game_session_repository.get_by_id_for_update(
+            game_session_id
+        )
         if not game_session:
-            raise ValueError(f"Игровая сессия с ID {game_session_id} не найдена!")
+            raise NotFoundError(f"Игровая сессия с ID {game_session_id} не найдена!")
 
         game_session.make_move(row, col, player_id)
 
@@ -162,17 +168,17 @@ class DeleteGameSessionUseCase:
     async def execute(self, game_session_id: str, player_id: str) -> None:
         session = await self.game_session_repository.get_by_id(game_session_id)
         if not session:
-            raise ValueError("Игровая сессия не найдена")
+            raise NotFoundError("Игровая сессия не найдена")
 
         if session.player_x_id != player_id:
-            raise ValueError("Только создатель лобби может удалить его")
+            raise ForbiddenError("Только создатель лобби может удалить его")
 
         if session.status in {
             GameSessionState.WON_X,
             GameSessionState.WON_O,
             GameSessionState.DRAW,
         }:
-            raise ValueError("Нельзя удалить уже начатую игру")
+            raise ConflictError("Нельзя удалить завершённую игру")
 
         await self.game_session_repository.delete(game_session_id)
 
@@ -189,10 +195,14 @@ class GetGameSessionUseCase:
     def __init__(self, game_session_repository: GameSessionRepositoryInterface):
         self._game_session_repository = game_session_repository
 
-    async def execute(self, game_session_id: str) -> GameSession:
+    async def execute(self, game_session_id: str, player_id: str) -> GameSession:
         game_session = await self._game_session_repository.get_by_id(game_session_id)
         if not game_session:
-            raise ValueError(f"Игровая сессия с ID {game_session_id} не найдена")
+            raise NotFoundError(f"Игровая сессия с ID {game_session_id} не найдена")
+
+        if not game_session.is_participant(player_id):
+            raise ForbiddenError("Нет доступа к этой игре")
+
         return game_session
 
 
@@ -203,5 +213,13 @@ class GetPlayerByUuidUseCase:
     async def execute(self, player_id: str) -> Player:
         player = await self._player_repository.get_by_id(player_id)
         if not player:
-            raise ValueError(f"Пользователь с UUID {player_id} не найден")
+            raise NotFoundError(f"Пользователь с UUID {player_id} не найден")
         return player
+
+
+class GetFinishedSessionsUseCase:
+    def __init__(self, game_session_repository: GameSessionRepositoryInterface):
+        self._game_session_repository = game_session_repository
+
+    async def execute(self, player_id: str) -> list[FinishedSessionInfo]:
+        return await self._game_session_repository.get_finished_by_player_id(player_id)

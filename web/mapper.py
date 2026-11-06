@@ -1,6 +1,13 @@
-from domain.entities.game_session import GameSession, WaitingSessionInfo
+from application.read_models import FinishedSessionInfo, WaitingSessionInfo
+from domain.entities.game_session import GameSession
 from domain.entities.playing_board import CellState
-from web.schema import AvailableSessionsResponse, GameResponse, WaitingSessionItem
+from web.schema import (
+    AvailableSessionsResponse,
+    FinishedSessionItem,
+    FinishedSessionsResponse,
+    GameResponse,
+    WaitingSessionItem,
+)
 
 
 class WebGameMapper:
@@ -40,5 +47,20 @@ class WebGameMapper:
                     creator_login=info.creator_login,
                 )
                 for info in domain_infos
+            ]
+        )
+
+    @classmethod
+    def to_finished_sessions_response(
+        cls, infos: list[FinishedSessionInfo]
+    ) -> FinishedSessionsResponse:
+        return FinishedSessionsResponse(
+            sessions=[
+                FinishedSessionItem(
+                    game_session_id=info.game_session_id,
+                    result=info.result,
+                    created_at=info.created_at,
+                )
+                for info in infos
             ]
         )

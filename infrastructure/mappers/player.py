@@ -1,5 +1,5 @@
-from datasource.model import PlayerDataModel
 from domain.entities.player import Player
+from infrastructure.model import PlayerDataModel
 
 
 class PlayerMapper:

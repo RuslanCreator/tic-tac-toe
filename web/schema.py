@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,3 +51,17 @@ class UserResponse(BaseModel):
     login: str = Field(..., description="Имя пользователя (логин)")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class FinishedSessionItem(BaseModel):
+    game_session_id: uuid.UUID = Field(..., description="ID игровой сессии")
+    result: Literal["WIN", "DRAW", "LOSE"] = Field(
+        ..., description="Результат для текущего игрока"
+    )
+    created_at: datetime = Field(..., description="Дата создания игры")
+
+
+class FinishedSessionsResponse(BaseModel):
+    sessions: list[FinishedSessionItem] = Field(
+        ..., description="Завершённые игры игрока"
+    )

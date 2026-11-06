@@ -1,6 +1,6 @@
-from datasource.model import GameSessionDataModel
 from domain.entities.game_session import GameSession, GameSessionState
 from domain.entities.playing_board import PlayingBoard
+from infrastructure.model import GameSessionDataModel
 
 
 class GameSessionMapper:
@@ -11,6 +11,7 @@ class GameSessionMapper:
             board=PlayingBoard.from_int_list(model.grid_cells, model.grid_size),
             player_x_id=model.player_x_id,
             player_o_id=model.player_o_id,
+            created_at=model.created_at,
             status=GameSessionState(model.status),
         )
 
@@ -23,6 +24,7 @@ class GameSessionMapper:
             player_x_id=entity.player_x_id,
             player_o_id=entity.player_o_id,
             grid_cells=entity.board.to_int_list(),
+            created_at=entity.created_at,
         )
 
     @staticmethod

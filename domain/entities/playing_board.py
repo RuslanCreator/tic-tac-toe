@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from enum import IntEnum
 
+from domain.errors import DomainError
+
 
 class CellState(IntEnum):
     EMPTY = 0
@@ -16,16 +18,16 @@ class PlayingBoard:
     @classmethod
     def create_empty(cls, grid_size: int = 3) -> "PlayingBoard":
         if grid_size <= 0:
-            raise ValueError("Размер сетки должен быть больше 0")
+            raise DomainError("Размер сетки должен быть больше 0")
         empty_grid = (CellState.EMPTY,) * (grid_size * grid_size)
         return cls(grid_size=grid_size, grid=empty_grid)
 
     @classmethod
     def from_int_list(cls, grid_cells: list[int], grid_size: int = 3) -> "PlayingBoard":
         if grid_size <= 0:
-            raise ValueError("Размер сетки должен быть больше 0")
+            raise DomainError("Размер сетки должен быть больше 0")
         if len(grid_cells) != grid_size * grid_size:
-            raise ValueError("Длина списка не соответствует размеру сетки")
+            raise DomainError("Длина списка не соответствует размеру сетки")
 
         return cls(
             grid_size=grid_size, grid=tuple(CellState(val) for val in grid_cells)
@@ -37,11 +39,11 @@ class PlayingBoard:
     def set_cell(self, row: int, col: int, state: CellState) -> "PlayingBoard":
         size = self.grid_size
         if not (0 <= row < size and 0 <= col < size):
-            raise ValueError(f"Координаты [{row}:{col}] выходят за границы доски!")
+            raise DomainError(f"Координаты [{row}:{col}] выходят за границы доски!")
 
         idx = row * size + col
         if self.grid[idx] != CellState.EMPTY:
-            raise ValueError(f"Клетка {row}:{col} уже занята!")
+            raise DomainError(f"Клетка {row}:{col} уже занята!")
 
         new_grid = list(self.grid)
         new_grid[idx] = state

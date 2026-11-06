@@ -5,12 +5,15 @@ import aiofiles
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select, text
+from sqlalchemy import select
 
-from datasource.model import Base, PlayerDataModel
-from di.container import infra_container
-from web.auth_router import auth_router
+from di.composition import AppContext
+from di.settings import Settings
+from infrastructure.model import Base, PlayerDataModel
+from web.auth.router import auth_router
+from web.errors import register_exception_handlers
 from web.router import game_router
+from web.ws.router import ws_router
 
 BASE_DIR = Path(__file__).resolve().parent
 HTML_FILE_PATH = BASE_DIR / "web" / "index.html"
@@ -18,29 +21,30 @@ HTML_FILE_PATH = BASE_DIR / "web" / "index.html"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with infra_container.engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Временный костыль для тестов: очищаем игры при каждом старте uvicorn
-        await conn.execute(text("TRUNCATE TABLE game_sessions CASCADE;"))
+    context = AppContext(Settings.from_env())
+    app.state.context = context
 
-    async with infra_container.session_factory() as session:
-        bot_exists = await session.scalar(
-            select(PlayerDataModel).where(PlayerDataModel.id == "bot")
-        )
-        if not bot_exists:
-            session.add(
-                PlayerDataModel(
-                    id="bot",
-                    login="Computer",
-                    password_hash="bot_hash_disabled",
-                )
+    try:
+        async with context.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with context.session_factory() as session:
+            bot_exists = await session.scalar(
+                select(PlayerDataModel).where(PlayerDataModel.id == "bot")
             )
+            if not bot_exists:
+                session.add(
+                    PlayerDataModel(
+                        id="bot",
+                        login="Computer",
+                        password_hash="bot_hash_disabled",
+                    )
+                )
+            await session.commit()
 
-        await session.commit()
-
-    yield
-
-    await infra_container.engine.dispose()
+        yield
+    finally:
+        await context.dispose()
 
 
 app = FastAPI(
@@ -49,8 +53,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+register_exception_handlers(app)
 app.include_router(auth_router)
 app.include_router(game_router)
+app.include_router(ws_router)
 
 
 @app.get("/", response_class=HTMLResponse, tags=["Frontend"])

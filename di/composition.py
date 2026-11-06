@@ -1,14 +1,19 @@
-import os
+from collections.abc import AsyncGenerator
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from starlette.requests import HTTPConnection
 
+from application.jwt_service import JWTService
+from application.ports.ai_player import AIPlayerInterface
+from application.ports.password_hasher import PasswordHasherInterface
 from application.services import MiniMaxService, PasswordCryptoService
 from application.use_cases import (
     AuthenticatePlayerUseCase,
     CreatePvEGameUseCase,
     CreatePvPGameUseCase,
     DeleteGameSessionUseCase,
+    GetFinishedSessionsUseCase,
     GetGameSessionUseCase,
     GetPlayerByUuidUseCase,
     GetWaitingSessionsUseCase,
@@ -17,62 +22,45 @@ from application.use_cases import (
     MakeMovePvPUseCase,
     SignUpUseCase,
 )
-from datasource.repositories.game_session import GameSessionRepository
-from datasource.repositories.player import PlayerRepository
-
-DB_USER = os.environ.get("DB_USER")
-DB_PASSWORD = os.environ.get("DB_PASSWORD")
-DB_NAME = os.environ.get("DB_NAME")
-# Замени на свои данные от локального Postgres на Маке
-# Если пароля нет, пиши просто: postgresql+asyncpg://имя_юзера@localhost:5432/tictactoe_db
-DATABASE_URL = f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@localhost:5432/{DB_NAME}"
+from di.settings import Settings
+from infrastructure.repositories.game_session import GameSessionRepository
+from infrastructure.repositories.player import PlayerRepository
 
 
-class DependencyContainer:
+class AppContext:
     """
-    Контейнер для долгоживущих инфраструктурных компонентов (Синглтонов).
-    Создается один раз при старте веб-сервера.
+    Composition root: создаёт и хранит долгоживущие ресурсы приложения.
+    Экземпляр собирается в lifespan и живёт в app.state.
+    Резолвингом зависимостей занимается FastAPI Depends, не этот класс.
     """
 
-    def __init__(self) -> None:
-        # 1. Создаем один асинхронный движок.
-        # Он управляет пулом сетевых соединений с Postgres.
-        self.engine = create_async_engine(DATABASE_URL, echo=False)
-
-        # 2. Создаем фабрику (генератор),
-        # которая умеет штамповать новые изолированные сессии
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.jwt_service = JWTService(
+            secret_key=settings.jwt.secret_key.get_secret_value(),
+            algorithm=settings.jwt.algorithm,
+            expire_minutes=settings.jwt.expire_minutes,
+        )
+        self.engine = create_async_engine(settings.database_url, echo=False)
         self.session_factory = async_sessionmaker(
             bind=self.engine, expire_on_commit=False
         )
+        self.crypto_service: PasswordHasherInterface = PasswordCryptoService()
+        self.ai_engine: AIPlayerInterface = MiniMaxService()
 
-        self._crypto_service = PasswordCryptoService()
-
-        # 3. Мозги ИИ по-прежнему синглтон,
-        # они не привязаны к сессиям базы данных
-        self._ai_engine = MiniMaxService()
-
-    @property
-    def ai_engine(self) -> MiniMaxService:
-        return self._ai_engine
-
-    @property
-    def crypto_service(self) -> PasswordCryptoService:
-        return self._crypto_service
+    async def dispose(self) -> None:
+        await self.engine.dispose()
 
 
-# Создаем один глобальный экземпляр долгоживущих настроек
-infra_container = DependencyContainer()
+def get_context(connection: HTTPConnection) -> AppContext:
+    return connection.app.state.context
 
 
-async def get_db_session():
-    """
-    Асинхронный провайдер сессии.
-    FastAPI автоматически откроет транзакцию в начале запроса и
-    гарантированно закроет её в конце!
-    """
-    async with infra_container.session_factory() as session:
-        async with session.begin():
-            yield session
+async def get_db_session(
+    context: AppContext = Depends(get_context),
+) -> AsyncGenerator[AsyncSession, None]:
+    async with context.session_factory() as session:
+        yield session
 
 
 # Каждая функция принимает свежую сессию базы данных этого конкретного HTTP-запроса,
@@ -86,19 +74,29 @@ def get_player_repository(
 
 
 def get_signup_use_case(
+    context: AppContext = Depends(get_context),
     repository: PlayerRepository = Depends(get_player_repository),
 ) -> SignUpUseCase:
     return SignUpUseCase(
-        player_repository=repository, crypto_service=infra_container.crypto_service
+        player_repository=repository,
+        crypto_service=context.crypto_service,
     )
 
 
 def get_authenticate_player_use_case(
+    context: AppContext = Depends(get_context),
     repository: PlayerRepository = Depends(get_player_repository),
 ) -> AuthenticatePlayerUseCase:
     return AuthenticatePlayerUseCase(
-        player_repository=repository, crypto_service=infra_container.crypto_service
+        player_repository=repository,
+        crypto_service=context.crypto_service,
     )
+
+
+def get_jwt_service(
+    context: AppContext = Depends(get_context),
+) -> JWTService:
+    return context.jwt_service
 
 
 def get_game_session_repository(
@@ -114,10 +112,12 @@ def get_create_pve_game_use_case(
 
 
 def get_make_move_pve_use_case(
+    context: AppContext = Depends(get_context),
     repository: GameSessionRepository = Depends(get_game_session_repository),
 ) -> MakeMovePvEUseCase:
     return MakeMovePvEUseCase(
-        game_session_repository=repository, ai_engine=infra_container.ai_engine
+        game_session_repository=repository,
+        ai_engine=context.ai_engine,
     )
 
 
@@ -161,3 +161,9 @@ def get_user_by_uuid_use_case(
     repository: PlayerRepository = Depends(get_player_repository),
 ) -> GetPlayerByUuidUseCase:
     return GetPlayerByUuidUseCase(player_repository=repository)
+
+
+def get_finished_sessions_use_case(
+    repository: GameSessionRepository = Depends(get_game_session_repository),
+) -> GetFinishedSessionsUseCase:
+    return GetFinishedSessionsUseCase(game_session_repository=repository)

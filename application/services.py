@@ -1,24 +1,35 @@
 import hashlib
+import hmac
 
+from application.ports.ai_player import AIPlayerInterface
+from application.ports.password_hasher import PasswordHasherInterface
 from domain.entities.game_session import GameRules
 from domain.entities.playing_board import CellState, PlayingBoard
+from domain.errors import DomainError
 
 
-class PasswordCryptoService:
+class PasswordCryptoService(PasswordHasherInterface):
+    _SALT = b"secret_salt_1"
+    _ITERATIONS = 100_000
+
     def hash_password(self, password: str) -> str:
-        salt_bytes = b"secret_salt_1"
-        pwd_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt_bytes, 100_000)
+        return hashlib.pbkdf2_hmac(
+            "sha256", password.encode(), self._SALT, self._ITERATIONS
+        ).hex()
 
-        return pwd_hash.hex()
+    def verify_password(self, password: str, password_hash: str) -> bool:
+        return hmac.compare_digest(
+            self.hash_password(password).encode(), password_hash.encode()
+        )
 
 
-class MiniMaxService:
+class MiniMaxService(AIPlayerInterface):
     def calculate_best_move(
         self, board: PlayingBoard, ai_sign: CellState
     ) -> tuple[int, int]:
         empty_cells = board.get_empty_cells()
         if not empty_cells:
-            raise ValueError("Нет доступных клеток для хода ИИ!")
+            raise DomainError("Нет доступных клеток для хода ИИ!")
 
         if len(empty_cells) == board.grid_size * board.grid_size:
             return (board.grid_size // 2, board.grid_size // 2)
